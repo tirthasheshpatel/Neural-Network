@@ -9,7 +9,6 @@ import os
 import sys
 
 # Importing and cleaning our dataset
-os.chdir("C:\\Users\\Hilak\\Desktop\\INTERESTS\\Machine Learning A-Z Template Folder\\Part 8 - Deep Learning\\Section 39 - Artificial Neural Networks (ANN)");
 dataset = pd.read_csv('Churn_Modelling.csv')
 X = dataset.iloc[:, 3:13].values
 y = dataset.iloc[:, 13].values
@@ -39,7 +38,7 @@ X_train = X_train.T
 X_test = X_test.T
 X_CV = X_CV.T
 
-# ANN -- Hand Wooven
+# ANN -- Hand made
 def sigmoid(z) : 
     return 1./(1 + np.exp(-z))
 def sigmoid_prime(z) :
@@ -168,7 +167,7 @@ class NeuralNet :
     def summary(self) :
         return self.cost, self.acc, self.W,self.B
     def __repr__(self) : 
-        return f'<UNDER CONST>'
+        return f'<Neural Network at {id(self)}>'
 
 
 # Testing our ANN
@@ -201,5 +200,5 @@ classifier.fit(X_train, y_train, batch_size = 5, epochs = 10)
 y_pred = classifier.predict(X_test)
 y_pred = 1*(y_pred > 0.5)
 test_acc = sum(sum(y_pred.T == y_test)) / y_test.size
-print(f"Test set Accuracy : {test_acc*100}%")
+print(f"Test set Accuracy (using keras) : {test_acc*100}%")
 X_train, X_test, X_CV = X_train.T, X_test.T, X_CV.T

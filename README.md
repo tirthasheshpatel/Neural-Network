@@ -1,2 +1,2 @@
 # Neural-Network
-Hand made Neural Network for demonstration and teaching purposes
+Light Weight Hand made Neural Network for demonstration and teaching purposes

@@ -8,32 +8,6 @@ warnings.filterwarnings('ignore');
 import os
 import sys
 
-# Importing our dataset
-os.chdir("C:/Users/Hilak/Desktop/INTERESTS/Machine Learning A-Z Template Folder/Part 3 - Classification/Section 14 - Logistic Regression");
-training_set = pd.read_csv("Social_Network_Ads.csv");
-
-# Splitting our dataset into matrix of features and output values.
-X = training_set.iloc[:, 1:4].values
-y = training_set.iloc[:, 4].values
-
-# Encoding our object features.
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder
-le_x = LabelEncoder()
-X[:,0] = le_x.fit_transform(X[:,0])
-ohe = OneHotEncoder(categorical_features = [0])
-X = ohe.fit_transform(X).toarray()
-
-# Performing Feature scaling
-from sklearn.preprocessing import StandardScaler
-ss = StandardScaler()
-X[:,2:4] = ss.fit_transform(X[:, 2:4])
-
-# Splitting the dataset into train and test set.
-from sklearn.model_selection import train_test_split
-X_train, X_test, y_train, y_test = train_test_split(X,y,test_size=0.3)
-X_train = X_train.T
-X_test = X_test.T
-
 def sigmoid(z) :
     """ Reutrns the element wise sigmoid function. """
     return 1./(1 + np.exp(-z))
@@ -70,7 +44,7 @@ PHI_PRIME = {'sigmoid':sigmoid_prime, 'relu':ReLU_prime, 'lrelu':lReLU_prime, 't
 
 class NeuralNet : 
     """
-    This is a class for making Artificial Neural Networks. L2 and Droupout are the 
+    This is a class for implementing Artificial Neural Networks. L2 and Droupout are the 
     default regularization methods implemented in this class. It takes the following parameters:
     
     1. layers      : A python list containing the different number of neurons in each layer.
@@ -90,7 +64,7 @@ class NeuralNet :
     
     7. W           : Weights of a pretrained neural network with same architecture.
     
-    8. W           : Biases of a pretrained neural network with same architecture.
+    8. B           : Biases of a pretrained neural network with same architecture.
     """
     def __init__(self, layers, X, y, ac_funcs, init_method='gaussian', loss_func='b_ce', W=np.array([]), B=np.array([])) :
         """ Initialize the network. """
@@ -107,6 +81,9 @@ class NeuralNet :
         self.X = X
         # Save coresponding output
         self.y = y
+        self.X_mini = None
+        self.y_mini = None
+        self.m_mini = None
         # List to store the cost of the model calculated during training
         self.cost = []
         # Stores the accuracy obtained on the test set.
@@ -120,7 +97,7 @@ class NeuralNet :
             self.B = B
         else : 
             if init_method=='gaussian': 
-                self.W = [np.random.randn(self.n[nl], self.n[nl-1]) for nl in range(1,len(self.n))]
+                self.W = [np.random.randn(self.n[nl], self.n[nl-1])*np.sqrt(2/self.n[nl-1]) for nl in range(1,len(self.n))]
                 self.B = [np.zeros((nl,1), 'float32') for nl in self.layers]
             elif init_method == 'random':
                 self.W = [np.random.rand(self.n[nl], self.n[nl-1]) for nl in range(1,len(self.n))]
@@ -129,49 +106,73 @@ class NeuralNet :
                 self.W = [np.zeros((self.n[nl], self.n[nl-1]), 'float32') for nl in range(1,len(self.n))]
                 self.B = [np.zeros((nl,1), 'float32') for nl in self.layers]
     
-    def startTraining(self, epochs, alpha, _lambda, keep_prob=0.5, interval=100):
+    def startTraining(self, batch_size, epochs, alpha, beta, _lambda, keep_prob=0.5, interval=100):
         """
         Start training the neural network. It takes the followng parameters : 
         
-        1. epochs : Number of epochs for which you want to train the network.
+        1. batch_size : Size of your mini batch. Must be greater than 1.
         
-        2. alpha  : The learning rate of your network.
+        2. epochs     : Number of epochs for which you want to train the every mini batch.
         
-        3. _lambda : L2 regularization parameter or the penalization parameter.
+        3. alpha      : The learning rate of your network.
         
-        4. keep_prob : Dropout regularization parameter. The probability of neurons to deactivate.
-                       Eg - 0.8 means 20% of the neurons have been deactivated.
+        4. beta       : Momentum
         
-        5. interval : The interval between updates of cost and accuracy.
+        5. _lambda    : L2 regularization parameter or the penalization parameter.
+        
+        6. keep_prob  : Dropout regularization parameter. The percentage of neurons to keep activated.
+                        Eg - 0.8 means 20% of the neurons have been deactivated.
+        
+        7. interval   : The interval between updates of cost and accuracy.
         """
+        dataset_size = self.X.shape[1]
+        mini_batch_size = dataset_size // batch_size
+        j=1
+        for i in range(0, dataset_size-mini_batch_size, mini_batch_size):
+            self.X_mini = self.X[:, i:i+mini_batch_size]
+            self.y_mini = self.y[:, i:i+mini_batch_size]
+            self.m_mini = self.y_mini.shape[1]
+            print(f'Training Mini Batch {j}')
+            self._miniBatchTraining(epochs, alpha, beta, _lambda, keep_prob, interval)
+            j+=1
+        
+        
+    
+    def _miniBatchTraining(self, epochs, alpha, beta, _lambda, keep_prob=0.5, interval=100):
         start = time.time()
+        vdw = [np.zeros(i.shape, "float32") for i in self.W]
+        vdb = [np.zeros(i.shape, "float32") for i in self.B]
         for i in range(epochs+1) : 
             z,a = self._feedForward(keep_prob)
             delta = self._cost_derivative(a[-1])
             for l in range(1,len(z)) : 
-                delta_w = np.dot(delta, a[-l-1].T) + (_lambda)*self.W[-l]
-                delta_b = np.sum(delta, axis=1, keepdims=True)
+                delta_w = (1/self.m_mini)*(np.dot(delta, a[-l-1].T) + (_lambda)*self.W[-l])
+                delta_b = (1/self.m_mini)*(np.sum(delta, axis=1, keepdims=True))
+                vdw[-l] = beta*vdw[-l] + (1-beta)*delta_w
+                vdb[-l] = beta*vdb[-l] + (1-beta)*delta_b
                 delta = np.dot(self.W[-l].T, delta)*PHI_PRIME[self.ac_funcs[-l-1]](z[-l-1])
-                self.W[-l] = self.W[-l] - (alpha/self.m)*delta_w
-                self.B[-l] = self.B[-l] - (alpha/self.m)*delta_b
-            delta_w = np.dot(delta, self.X.T ) + (_lambda)*self.W[0]
-            delta_b = np.sum(delta, axis=1, keepdims=True)
-            self.W[0] = self.W[0] - (alpha/self.m)*delta_w
-            self.B[0] = self.B[0] - (alpha/self.m)*delta_b
+                self.W[-l] = self.W[-l] - (alpha)*vdw[-l]
+                self.B[-l] = self.B[-l] - (alpha)*vdb[-l]
+            delta_w = (1/self.m_mini)*(np.dot(delta, self.X_mini.T ) + (_lambda)*self.W[0])
+            delta_b = (1/self.m_mini)*(np.sum(delta, axis=1, keepdims=True))
+            vdw[0] = beta*vdw[0] + (1-beta)*delta_w
+            vdb[0] = beta*vdb[0] + (1-beta)*delta_b
+            self.W[0] = self.W[0] - (alpha)*vdw[0]
+            self.B[0] = self.B[0] - (alpha)*vdb[0]
             if not i%interval :
                 aa = self.predict(self.X)
                 if self.loss == 'b_ce':
-                    aa = aa > 0.5
-                    self.acc = sum(sum(aa == self.y)) / self.m
-                    cost_val = self._cost_func(a[-1], _lambda)
+                    aa_ = aa > 0.5
+                    self.acc = np.sum(aa_ == self.y) / self.m
+                    cost_val = self._cost_func(aa, _lambda)
                     self.cost.append(cost_val)
                 elif self.loss == 'c_ce':
-                    aa = np.argmax(aa, axis = 0)
+                    aa_ = np.argmax(aa, axis = 0)
                     yy = np.argmax(self.y, axis = 0)
-                    self.acc = np.sum(aa==yy)/(self.m)
-                    cost_val = self._cost_func(a[-1], _lambda)
+                    self.acc = np.sum(aa_==yy)/(self.m)
+                    cost_val = self._cost_func(aa, _lambda)
                     self.cost.append(cost_val)
-            sys.stdout.write(f'\rEpoch[{i}] : Cost = {cost_val:.2f} ; Acc = {(self.acc*100):.2f}% ; Time Taken = {(time.time()-start):.2f}s')
+            sys.stdout.write(f'\rEpoch[{i}] : Cost = {cost_val:.4f} ; Acc = {(self.acc*100):.2f}% ; Time Taken = {(time.time()-start):.0f}s')
         print('\n')
         return None
     
@@ -186,13 +187,15 @@ class NeuralNet :
     def _feedForward(self, keep_prob):
         """ Forward pass """
         z = [];a = []
-        z.append(np.dot(self.W[0], self.X) + self.B[0])
+        z.append(np.dot(self.W[0], self.X_mini) + self.B[0])
         a.append(PHI[self.ac_funcs[0]](z[-1]))
-        for l in range(1,len(self.layers)):
+        for l in range(1,len(self.layers)-1):
             z.append(np.dot(self.W[l], a[-1]) + self.B[l])
             # a.append(PHI[self.ac_funcs[l]](z[l]))
             _a = PHI[self.ac_funcs[l]](z[l])
-            a.append( ((np.random.rand(_a.shape[0],1) < keep_prob)*_a)/keep_prob )
+            a.append( ((np.random.rand(*_a.shape) < keep_prob)*_a)/keep_prob )
+        z.append(np.dot(self.W[-1], a[-1]) + self.B[-1])
+        a.append(PHI[self.ac_funcs[-1]](z[-1]))
         return z,a
     
     def _cost_func(self, a, _lambda):
@@ -201,44 +204,10 @@ class NeuralNet :
 
     def _cost_derivative(self, a) : 
         """ The derivative of cost w.r.t z """
-        return (a-self.y)
+        return (a-self.y_mini)
    
     @property
     def summary(self) :
         return self.cost, self.acc, self.W,self.B
     def __repr__(self) : 
         return f'<Neural Network at {id(self)}>'
-    
-# Initializing our neural network
-neural_net_sigmoid = NeuralNet([32,16,1], X_train, y_train, ac_funcs = ['relu','relu','sigmoid'])
-# Staring the training of our network.
-neural_net_sigmoid.startTraining(5000, 0.01, 0.2, 0.5, 100)
-# Predicting on new dataset using our trained network.
-preds = neural_net_sigmoid.predict(X_test)
-preds = preds > 0.5
-acc = (sum(sum(preds == y_test)) / y_test.size)*100
-# Accuracy (metric of evaluation) obtained by the network.
-print(f'Test set Accuracy ( r-t-s ) : {acc}%')
-
-# Plotting our cost vs epochs relationship
-sigmoid_summary = neural_net_sigmoid.summary
-plt.plot(range(len(sigmoid_summary[0])), sigmoid_summary[0], label='Sigmoid Cost')
-plt.title('Cost')
-plt.show()
-
-# Comparing our results with the library keras.
-from keras.models import Sequential
-from keras.layers import Dense
-X_train, X_test = X_train.T, X_test.T
-classifier = Sequential()
-classifier.add(Dense(input_dim=4, units = 32, kernel_initializer="uniform", activation="relu"))
-classifier.add(Dense(units = 16, kernel_initializer = "uniform", activation="relu"))
-# classifier.add(Dense(units = 16, kernel_initializer = "uniform", activation="tanh"))
-classifier.add(Dense(units = 1, kernel_initializer = "uniform", activation = "sigmoid"))
-classifier.compile(optimizer = "adam", loss = "binary_crossentropy", metrics = ["accuracy"])
-classifier.fit(X_train, y_train, batch_size = 1, epochs = 30)
-y_pred = classifier.predict(X_test)
-y_pred = 1*(y_pred > 0.5)
-test_acc = sum(sum(y_pred.T == y_test)) / y_test.size
-print(f"Test set Accuracy : {test_acc*100}%")
-X_train, X_test = X_train.T, X_test.T

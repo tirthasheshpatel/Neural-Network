@@ -91,7 +91,7 @@ class NeuralNet :
         # Activation function of each layer
         self.ac_funcs = ac_funcs
         self.loss = loss_func
-        # Inittialize the weights by provided methods if not provided.
+        # Initialize the weights by provided method.
         if len(W) and len(B) :
             self.W = W
             self.B = B
@@ -105,75 +105,85 @@ class NeuralNet :
             elif init_method == 'zeros':
                 self.W = [np.zeros((self.n[nl], self.n[nl-1]), 'float32') for nl in range(1,len(self.n))]
                 self.B = [np.zeros((nl,1), 'float32') for nl in self.layers]
+        self.vdw = [np.zeros(i.shape) for i in self.W]
+        self.vdb = [np.zeros(i.shape) for i in self.B]
+        self.sdw = [np.zeros(i.shape) for i in self.W]
+        self.sdb = [np.zeros(i.shape) for i in self.B]
     
-    def startTraining(self, batch_size, epochs, alpha, beta, _lambda, keep_prob=0.5, interval=100):
+    def startTraining(self, batch_size, epochs, alpha, decay_rate, beta1, beta2, _lambda, keep_prob=0.5, interval=10):
         """
         Start training the neural network. It takes the followng parameters : 
         
         1. batch_size : Size of your mini batch. Must be greater than 1.
         
-        2. epochs     : Number of epochs for which you want to train the every mini batch.
+        2. epochs     : Number of epochs for which you want to train the network.
         
         3. alpha      : The learning rate of your network.
         
-        4. beta       : Momentum
+        4. decay_rate : The rate at which you want to decrease your learning rate.
         
-        5. _lambda    : L2 regularization parameter or the penalization parameter.
+        4. beta1      : Momentum
         
-        6. keep_prob  : Dropout regularization parameter. The percentage of neurons to keep activated.
+        5. beta2      : RMSprop Parameter
+        
+        6. _lambda    : L2 regularization parameter or the penalization parameter.
+        
+        7. keep_prob  : Dropout regularization parameter. The percentage of neurons to keep activated.
                         Eg - 0.8 means 20% of the neurons have been deactivated.
         
-        7. interval   : The interval between updates of cost and accuracy.
+        8. interval   : The interval between updates of cost and accuracy.
         """
         dataset_size = self.X.shape[1]
-        mini_batch_size = dataset_size // batch_size
-        j=1
-        for i in range(0, dataset_size-mini_batch_size, mini_batch_size):
-            self.X_mini = self.X[:, i:i+mini_batch_size]
-            self.y_mini = self.y[:, i:i+mini_batch_size]
-            self.m_mini = self.y_mini.shape[1]
-            print(f'Training Mini Batch {j}')
-            self._miniBatchTraining(epochs, alpha, beta, _lambda, keep_prob, interval)
-            j+=1
-        
+        k=1
+        cost_val = 0
+        for j in range(1, epochs+1):
+            start = time.time()
+            alpha = alpha/( 1 + decay_rate*(j-1) )
+            for i in range(0, dataset_size-batch_size+1, batch_size):
+                self.X_mini = self.X[:, i:i+batch_size]
+                self.y_mini = self.y[:, i:i+batch_size]
+                self.m_mini = self.y_mini.shape[1]
+                self._miniBatchTraining(alpha, beta1, beta2, _lambda, keep_prob,k)
+                aa = self.predict(self.X)
+                if not k%interval:
+                    if self.loss == 'b_ce':
+                        aa_ = aa > 0.5
+                        self.acc = np.sum(aa_ == self.y) / self.m
+                        cost_val = self._cost_func(aa, _lambda)
+                        self.cost.append(cost_val)
+                    elif self.loss == 'c_ce':
+                        aa_ = np.argmax(aa, axis = 0)
+                        yy = np.argmax(self.y, axis = 0)
+                        self.acc = np.sum(aa_==yy)/(self.m)
+                        cost_val = self._cost_func(aa, _lambda)
+                        self.cost.append(cost_val)
+                sys.stdout.write(f'\rEpoch[{j}] {i+batch_size}/{self.m} : Cost = {cost_val:.4f} ; Acc = {(self.acc*100):.2f}% ; Time Taken = {(time.time()-start):.0f}s')
+                k+=1
+            print("\n")
         
     
-    def _miniBatchTraining(self, epochs, alpha, beta, _lambda, keep_prob=0.5, interval=100):
-        start = time.time()
-        vdw = [np.zeros(i.shape, "float32") for i in self.W]
-        vdb = [np.zeros(i.shape, "float32") for i in self.B]
-        for i in range(epochs+1) : 
-            z,a = self._feedForward(keep_prob)
-            delta = self._cost_derivative(a[-1])
-            for l in range(1,len(z)) : 
-                delta_w = (1/self.m_mini)*(np.dot(delta, a[-l-1].T) + (_lambda)*self.W[-l])
-                delta_b = (1/self.m_mini)*(np.sum(delta, axis=1, keepdims=True))
-                vdw[-l] = beta*vdw[-l] + (1-beta)*delta_w
-                vdb[-l] = beta*vdb[-l] + (1-beta)*delta_b
-                delta = np.dot(self.W[-l].T, delta)*PHI_PRIME[self.ac_funcs[-l-1]](z[-l-1])
-                self.W[-l] = self.W[-l] - (alpha)*vdw[-l]
-                self.B[-l] = self.B[-l] - (alpha)*vdb[-l]
-            delta_w = (1/self.m_mini)*(np.dot(delta, self.X_mini.T ) + (_lambda)*self.W[0])
+    def _miniBatchTraining(self, alpha, beta1, beta2, _lambda, keep_prob,i):
+        epsilon = 1e-8
+        z,a = self._feedForward(keep_prob)
+        delta = self._cost_derivative(a[-1])
+        for l in range(1,len(z)) : 
+            delta_w = (1/self.m_mini)*(np.dot(delta, a[-l-1].T) + (_lambda)*self.W[-l])
             delta_b = (1/self.m_mini)*(np.sum(delta, axis=1, keepdims=True))
-            vdw[0] = beta*vdw[0] + (1-beta)*delta_w
-            vdb[0] = beta*vdb[0] + (1-beta)*delta_b
-            self.W[0] = self.W[0] - (alpha)*vdw[0]
-            self.B[0] = self.B[0] - (alpha)*vdb[0]
-            if not i%interval :
-                aa = self.predict(self.X)
-                if self.loss == 'b_ce':
-                    aa_ = aa > 0.5
-                    self.acc = np.sum(aa_ == self.y) / self.m
-                    cost_val = self._cost_func(aa, _lambda)
-                    self.cost.append(cost_val)
-                elif self.loss == 'c_ce':
-                    aa_ = np.argmax(aa, axis = 0)
-                    yy = np.argmax(self.y, axis = 0)
-                    self.acc = np.sum(aa_==yy)/(self.m)
-                    cost_val = self._cost_func(aa, _lambda)
-                    self.cost.append(cost_val)
-            sys.stdout.write(f'\rEpoch[{i}] : Cost = {cost_val:.4f} ; Acc = {(self.acc*100):.2f}% ; Time Taken = {(time.time()-start):.0f}s')
-        print('\n')
+            self.vdw[-l] = (beta1*self.vdw[-l] + (1-beta1)*delta_w)/(1 - beta1**i)
+            self.vdb[-l] = (beta1*self.vdb[-l] + (1-beta1)*delta_b)/(1 - beta1**i)
+            self.sdw[-l] = (beta2*self.sdw[-l] + (1-beta2)*(delta_w**2))/(1 - beta2**i)
+            self.sdb[-l] = (beta2*self.sdb[-l] + (1-beta2)*(delta_b**2))/(1 - beta2**i)
+            delta = np.dot(self.W[-l].T, delta)*PHI_PRIME[self.ac_funcs[-l-1]](z[-l-1])
+            self.W[-l] = self.W[-l] - (alpha)*(self.vdw[-l]/(np.sqrt(self.sdw[-l])+epsilon))
+            self.B[-l] = self.B[-l] - (alpha)*(self.vdb[-l]/(np.sqrt(self.sdb[-l])+epsilon))
+        delta_w = (1/self.m_mini)*(np.dot(delta, self.X_mini.T ) + (_lambda)*self.W[0])
+        delta_b = (1/self.m_mini)*(np.sum(delta, axis=1, keepdims=True))
+        self.vdw[0] = (beta1*self.vdw[0] + (1-beta1)*delta_w)/(1 - beta1**i)
+        self.vdb[0] = (beta1*self.vdb[0] + (1-beta1)*delta_b)/(1 - beta1**i)
+        self.sdw[0] = (beta2*self.sdw[0] + (1-beta2)*(delta_w**2))/(1 - beta2**i)
+        self.sdb[0] = (beta2*self.sdb[0] + (1-beta2)*(delta_b**2))/(1 - beta2**i)
+        self.W[0] = self.W[0] - (alpha)*(self.vdw[0]/(np.sqrt(self.sdw[0])+epsilon))
+        self.B[0] = self.B[0] - (alpha)*(self.vdb[0]/(np.sqrt(self.sdb[0])+epsilon))
         return None
     
     def predict(self, X_test) :

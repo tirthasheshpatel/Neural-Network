@@ -4,9 +4,40 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import warnings
 import time
-warnings.filterwarnings('ignore');
+warnings.filterwarnings('ignore')
 import os
 import sys
+from concurrent.futures import ProcessPoolExecutor as ppe
+
+os.chdir("C:\\Users\\Hilak\\Desktop\\INTERESTS\\Machine Learning A-Z Template Folder\\Part 8 - Deep Learning\\Section 39 - Artificial Neural Networks (ANN)");
+dataset = pd.read_csv('Churn_Modelling.csv')
+X = dataset.iloc[:, 3:13].values
+y = dataset.iloc[:, [13]].values
+
+# Encoding categorical data
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder
+labelencoder_X_1 = LabelEncoder()
+X[:, 1] = labelencoder_X_1.fit_transform(X[:, 1])
+labelencoder_X_2 = LabelEncoder()
+X[:, 2] = labelencoder_X_2.fit_transform(X[:, 2])
+onehotencoder = OneHotEncoder(categorical_features = [1])
+X = onehotencoder.fit_transform(X).toarray()
+X = X[:, 1:]
+
+# Splitting the dataset into the Training set and Test set
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.2)
+
+# Feature Scaling
+from sklearn.preprocessing import StandardScaler
+sc = StandardScaler()
+X_train = sc.fit_transform(X_train)
+X_test = sc.transform(X_test)
+
+X_train = X_train.T
+X_test = X_test.T
+y_train = y_train.T
+y_test = y_test.T
 
 def sigmoid(z) :
     """ Reutrns the element wise sigmoid function. """
@@ -34,12 +65,18 @@ def tanh(z) :
 def tanh_prime(z) : 
     """ Returns the derivative of the tanh function. """
     return (1-tanh(z)**2)
+def softmax(z) :
+    t = np.exp(z)
+    return (t/np.sum(t,axis=0))
+def softmax_prime(z):
+    return softmax(z)*(1-softmax(z))
+    
 
 # A dictionary of our activation functions
-PHI = {'sigmoid':sigmoid, 'relu':ReLU, 'lrelu':lReLU, 'tanh':tanh}
+PHI = {'sigmoid':sigmoid, 'relu':ReLU, 'lrelu':lReLU, 'tanh':tanh, 'softmax':softmax}
 
 # A dictionary containing the derivatives of our activation functions
-PHI_PRIME = {'sigmoid':sigmoid_prime, 'relu':ReLU_prime, 'lrelu':lReLU_prime, 'tanh':tanh_prime}
+PHI_PRIME = {'sigmoid':sigmoid_prime, 'relu':ReLU_prime, 'lrelu':lReLU_prime, 'tanh':tanh_prime, 'softmax':softmax_prime}
 
 
 class NeuralNet : 
@@ -110,7 +147,7 @@ class NeuralNet :
         self.sdw = [np.zeros(i.shape) for i in self.W]
         self.sdb = [np.zeros(i.shape) for i in self.B]
     
-    def startTraining(self, batch_size, epochs, alpha, decay_rate, beta1, beta2, _lambda, keep_prob=0.5, interval=10):
+    def startTraining(self, batch_size, epochs, alpha, decay_rate, _lambda, keep_prob, beta1=0.9, beta2=0.999, interval=10, print_metrics = True, evaluate=False, X_test=None, y_test=None):
         """
         Start training the neural network. It takes the followng parameters : 
         
@@ -121,17 +158,17 @@ class NeuralNet :
         3. alpha      : The learning rate of your network.
         
         4. decay_rate : The rate at which you want to decrease your learning rate.
-        
-        4. beta1      : Momentum
-        
-        5. beta2      : RMSprop Parameter
-        
-        6. _lambda    : L2 regularization parameter or the penalization parameter.
-        
-        7. keep_prob  : Dropout regularization parameter. The percentage of neurons to keep activated.
+
+        5. _lambda    : L2 regularization parameter or the penalization parameter.
+
+        6. keep_prob  : Python List. Dropout regularization parameter. The percentage of neurons to keep activated.
                         Eg - 0.8 means 20% of the neurons have been deactivated.
         
-        8. interval   : The interval between updates of cost and accuracy.
+        7. beta1      : Momentum. default=0.9
+        
+        8. beta2      : RMSprop Parameter. default=0.999
+        
+        9. interval   : The interval between updates of cost and accuracy.
         """
         dataset_size = self.X.shape[1]
         k=1
@@ -157,9 +194,24 @@ class NeuralNet :
                         self.acc = np.sum(aa_==yy)/(self.m)
                         cost_val = self._cost_func(aa, _lambda)
                         self.cost.append(cost_val)
-                sys.stdout.write(f'\rEpoch[{j}] {i+batch_size}/{self.m} : Cost = {cost_val:.4f} ; Acc = {(self.acc*100):.2f}% ; Time Taken = {(time.time()-start):.0f}s')
+                if print_metrics:
+                    sys.stdout.write(f'\rEpoch[{j}] {i+batch_size}/{self.m} : Cost = {cost_val:.4f} ; Acc = {(self.acc*100):.2f}% ; Time Taken = {(time.time()-start):.0f}s')
+                    print("\n")
                 k+=1
-            print("\n")
+        if evaluate:
+            print(f"For batch_size = {batch_size}, epochs = {epochs}, alpha = {alpha}, decay_rate = {decay_rate}, _lambda = {_lambda}, keep_prob = {keep_prob}")
+            aa = self.predict(X_test)
+            if self.loss == 'b_ce':
+                aa_ = aa > 0.5
+                acc = np.sum(aa_ == y_test) / X_test.shape[1]
+                print(f"Accuracy on training set: {self.acc}")
+                print(f"Accuracy on test set: {acc}\n")
+            elif self.loss == 'c_ce':
+                aa_ = np.argmax(aa, axis = 0)
+                yy = np.argmax(y_test, axis = 0)
+                acc = np.sum(aa_==yy)/(X_test.shape[1])
+                print(f"Accuracy on training set: {self.acc}")
+                print(f"Accuracy on test set: {acc}\n")
         
     
     def _miniBatchTraining(self, alpha, beta1, beta2, _lambda, keep_prob,i):
@@ -211,15 +263,17 @@ class NeuralNet :
             z.append(np.dot(self.W[l], a[-1]) + self.B[l])
             # a.append(PHI[self.ac_funcs[l]](z[l]))
             _a = PHI[self.ac_funcs[l]](z[l])
-            a.append( ((np.random.rand(*_a.shape) < keep_prob)*_a)/keep_prob )
+            a.append( ((np.random.rand(*_a.shape) < keep_prob[l-1])*_a)/keep_prob[l-1] )
         z.append(np.dot(self.W[-1], a[-1]) + self.B[-1])
         a.append(PHI[self.ac_funcs[-1]](z[-1]))
         return z,a
     
     def _cost_func(self, a, _lambda):
         """ Binary Cross Entropy Cost Function """
-        return ( (-1/self.m)*np.sum(np.nan_to_num(self.y*np.log(a) + (1-self.y)*np.log(1-a))) + (_lambda/(2*self.m))*np.sum([np.sum(i**2) for i in self.W]) )
-
+        if self.ac_funcs[-1] == 'sigmoid':
+            return ( (-1/self.m)*np.sum(np.nan_to_num(self.y*np.log(a+10e-8) + (1-self.y)*np.log(1-a+10e-8))) + (_lambda/(2*self.m))*np.sum([np.sum(i**2) for i in self.W]) )
+        return ( (-1/self.m)*np.sum(np.nan_to_num(self.y*np.log(a))) + (_lambda/(2*self.m))*np.sum([np.sum(i**2) for i in self.W]) )
+        
     def _cost_derivative(self, a) : 
         """ The derivative of cost w.r.t z """
         return (a-self.y_mini)
@@ -229,3 +283,38 @@ class NeuralNet :
         return self.cost, self.acc, self.W,self.B
     def __repr__(self) : 
         return f'<Neural Network at {id(self)}>'
+
+
+class HyperParameterTuning:
+
+    def __init__(self):
+        pass
+
+    def GridSearch(self, layers, X, y, ac_funcs, params, X_test, y_test):
+        if __name__ == '__main__':
+            models=[]
+            with ppe(max_workers = len(params)) as pool:
+                for param in params:
+                    models.append(NeuralNet(layers, X, y, ac_funcs))
+                    pool.submit(models[-1].startTraining, batch_size=param['batch_size'], epochs=param['epochs'], alpha=param['alpha'], decay_rate=param['decay_rate'], _lambda=param['_lambda'], keep_prob=param['keep_prob'], print_metrics=False, evaluate=True, X_test=X_test, y_test=y_test)
+
+    def RandomizedGridSearch(self,target):
+        pass
+
+    def __repr__(self):
+        return f'<HPT at {id(self)}>'
+
+
+# Hyperparameter Tuning for batch_size, epochs, alpha, decay_rate, _lambda, keep_prob
+params = [
+            {'batch_size':100,'epochs':20,'alpha':0.1,'decay_rate':0,'_lambda':0.5,'keep_prob':[0.86,0.9,1]},
+            {'batch_size':200,'epochs':40,'alpha':0.1,'decay_rate':0.001,'_lambda':0.7,'keep_prob':[0.8,0.9,1]},
+            {'batch_size':300,'epochs':60,'alpha':0.07,'decay_rate':0.001,'_lambda':0.3,'keep_prob':[0.9,0.9,1]},
+            {'batch_size':400,'epochs':80,'alpha':0.05,'decay_rate':0,'_lambda':1,'keep_prob':[0.75,0.95,1]},
+            {'batch_size':500,'epochs':100,'alpha':0.04,'decay_rate':0,'_lambda':0.8,'keep_prob':[0.5,0.95,1]},
+            {'batch_size':600,'epochs':120,'alpha':0.03,'decay_rate':0,'_lambda':0.9,'keep_prob':[0.85,0.85,1]},
+            {'batch_size':700,'epochs':150,'alpha':0.03,'decay_rate':0,'_lambda':1,'keep_prob':[0.8,0.9,1]},
+            {'batch_size':800,'epochs':200,'alpha':0.02,'decay_rate':0,'_lambda':1.5,'keep_prob':[0.9,0.9,1]}
+         ]
+hpt = HyperParameterTuning()
+hpt.GridSearch([16,16,1], X_train, y_train, ['relu','relu','sigmoid'], params, X_test, y_test)

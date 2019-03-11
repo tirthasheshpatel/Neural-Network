@@ -298,8 +298,24 @@ class HyperParameterTuning:
                     models.append(NeuralNet(layers, X, y, ac_funcs))
                     pool.submit(models[-1].startTraining, batch_size=param['batch_size'], epochs=param['epochs'], alpha=param['alpha'], decay_rate=param['decay_rate'], _lambda=param['_lambda'], keep_prob=param['keep_prob'], print_metrics=False, evaluate=True, X_test=X_test, y_test=y_test)
 
-    def RandomizedGridSearch(self,target):
-        pass
+    def RandomizedGridSearch(self, layers, X, y, ac_funcs, params_range, nb_models, X_test, y_test):
+    	if __name__ == '__main__':
+	    	models = []
+	    	params = []
+	    	for i in range(nb_models):
+	    		params.append({
+	    			'batch_size' : int(np.round(np.random.rand()*(params_range['batch_size'][1]-params_range['batch_size'][0]) + params_range['batch_size'][0])),
+	    			'epochs' : int(np.round(np.random.rand()*(params_range['epochs'][1]-params_range['epochs'][0]) + params_range['epochs'][0])),
+	    			'alpha' : 10**(np.random.rand()*(np.log10(params_range['alpha'][1])-np.log10(params_range['alpha'][0])) + np.log10(params_range['alpha'][0])),
+	    			'decay_rate' : 10**(np.random.rand()*(np.log10(params_range['decay_rate'][1])-np.log10(params_range['decay_rate'][0])) + np.log10(params_range['decay_rate'][0])),
+	    			'_lambda' : 10**(np.random.rand()*(np.log10(params_range['_lambda'][1])-np.log10(params_range['_lambda'][0])) + np.log10(params_range['_lambda'][0])),
+	    			'keep_prob' : [(np.random.rand()*(params_range['keep_prob'][1]-params_range['keep_prob'][0]) + params_range['keep_prob'][0]) for j in range(len(layers)-1)]
+	    			})
+	    	with ppe(max_workers = len(params)) as pool:
+	    		for param in params:
+	    			models.append(NeuralNet(layers, X, y, ac_funcs))
+	    			pool.submit(models[-1].startTraining, batch_size=param['batch_size'], epochs=param['epochs'], alpha=param['alpha'], decay_rate=param['decay_rate'], _lambda=param['_lambda'], keep_prob=param['keep_prob'], print_metrics=False, evaluate=True, X_test=X_test, y_test=y_test)
+        
 
     def __repr__(self):
         return f'<HPT at {id(self)}>'
@@ -316,5 +332,9 @@ params = [
             {'batch_size':700,'epochs':150,'alpha':0.03,'decay_rate':0,'_lambda':1,'keep_prob':[0.8,0.9,1]},
             {'batch_size':800,'epochs':200,'alpha':0.02,'decay_rate':0,'_lambda':1.5,'keep_prob':[0.9,0.9,1]}
          ]
+
+params_range = {'batch_size':[100, 1000],'epochs':[20,200],'alpha':[0.001, 0.02],'decay_rate':[0.000001, 0.0001],'_lambda':[0.1, 1.5],'keep_prob':[0.75, 1]}
+
 hpt = HyperParameterTuning()
-hpt.GridSearch([16,16,1], X_train, y_train, ['relu','relu','sigmoid'], params, X_test, y_test)
+# hpt.GridSearch([16,16,1], X_train, y_train, ['relu','relu','sigmoid'], params, X_test, y_test)
+hpt.RandomizedGridSearch([16,16,1], X_train, y_train, ['relu','relu','sigmoid'], params_range, 20, X_test, y_test)

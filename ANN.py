@@ -1,21 +1,28 @@
 # Importing the libraries
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
 import pandas as pd
 import warnings
 import time
-warnings.filterwarnings('ignore')
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor as ppe
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix, roc_curve, auc, classification_report
 
+# Setting up the environment
+warnings.filterwarnings('ignore')
+os.system("CLS")
+
+# Getting our dataset
 os.chdir("C:\\Users\\Hilak\\Desktop\\INTERESTS\\Machine Learning A-Z Template Folder\\Part 8 - Deep Learning\\Section 39 - Artificial Neural Networks (ANN)");
 dataset = pd.read_csv('Churn_Modelling.csv')
 X = dataset.iloc[:, 3:13].values
 y = dataset.iloc[:, [13]].values
 
 # Encoding categorical data
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 labelencoder_X_1 = LabelEncoder()
 X[:, 1] = labelencoder_X_1.fit_transform(X[:, 1])
 labelencoder_X_2 = LabelEncoder()
@@ -25,19 +32,20 @@ X = onehotencoder.fit_transform(X).toarray()
 X = X[:, 1:]
 
 # Splitting the dataset into the Training set and Test set
-from sklearn.model_selection import train_test_split
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.2)
 
 # Feature Scaling
-from sklearn.preprocessing import StandardScaler
 sc = StandardScaler()
 X_train = sc.fit_transform(X_train)
 X_test = sc.transform(X_test)
+
 
 X_train = X_train.T
 X_test = X_test.T
 y_train = y_train.T
 y_test = y_test.T
+
+
 
 def sigmoid(z) :
     """ Reutrns the element wise sigmoid function. """
@@ -103,7 +111,7 @@ class NeuralNet :
     
     8. B           : Biases of a pretrained neural network with same architecture.
     """
-    def __init__(self, layers, X, y, ac_funcs, init_method='gaussian', loss_func='b_ce', W=np.array([]), B=np.array([])) :
+    def __init__(self, layers, X, y, ac_funcs, init_method='xavier', loss_func='b_ce', W=np.array([]), B=np.array([])) :
         """ Initialize the network. """
         # Store the layers of the network
         self.layers = layers
@@ -133,8 +141,11 @@ class NeuralNet :
             self.W = W
             self.B = B
         else : 
-            if init_method=='gaussian': 
+            if init_method=='xavier': 
                 self.W = [np.random.randn(self.n[nl], self.n[nl-1])*np.sqrt(2/self.n[nl-1]) for nl in range(1,len(self.n))]
+                self.B = [np.zeros((nl,1), 'float32') for nl in self.layers]
+            elif init_method=='gaussian': 
+                self.W = [np.random.randn(self.n[nl], self.n[nl-1]) for nl in range(1,len(self.n))]
                 self.B = [np.zeros((nl,1), 'float32') for nl in self.layers]
             elif init_method == 'random':
                 self.W = [np.random.rand(self.n[nl], self.n[nl-1]) for nl in range(1,len(self.n))]
@@ -147,71 +158,81 @@ class NeuralNet :
         self.sdw = [np.zeros(i.shape) for i in self.W]
         self.sdb = [np.zeros(i.shape) for i in self.B]
     
-    def startTraining(self, batch_size, epochs, alpha, decay_rate, _lambda, keep_prob, beta1=0.9, beta2=0.999, interval=10, print_metrics = True, evaluate=False, X_test=None, y_test=None):
+    def startTraining(self, batch_size, epochs, alpha, decay_rate, _lambda, keep_prob, threshold=0.5, beta1=0.9, beta2=0.999, interval=10, print_metrics = True, evaluate=False, X_test=None, y_test=None):
         """
         Start training the neural network. It takes the followng parameters : 
         
         1. batch_size : Size of your mini batch. Must be greater than 1.
         
-        2. epochs     : Number of epochs for which you want to train the network.
+        2. epochs         : Number of epochs for which you want to train the network.
         
-        3. alpha      : The learning rate of your network.
+        3. alpha          : The learning rate of your network.
         
-        4. decay_rate : The rate at which you want to decrease your learning rate.
+        4. decay_rate     : The rate at which you want to decrease your learning rate.
 
-        5. _lambda    : L2 regularization parameter or the penalization parameter.
+        5. _lambda        : L2 regularization parameter or the penalization parameter.
 
-        6. keep_prob  : Python List. Dropout regularization parameter. The percentage of neurons to keep activated.
-                        Eg - 0.8 means 20% of the neurons have been deactivated.
+        6. keep_prob      : Python List. Dropout regularization parameter. The percentage of neurons to keep activated.
+                            Eg - 0.8 means 20% of the neurons have been deactivated.
+
+        7. threshold      : Threshold for binary classification
         
-        7. beta1      : Momentum. default=0.9
+        8. beta1          : Momentum. default=0.9
         
-        8. beta2      : RMSprop Parameter. default=0.999
+        9. beta2          : RMSprop Parameter. default=0.999
         
-        9. interval   : The interval between updates of cost and accuracy.
+        10. interval      : The interval between updates of cost and accuracy. default=10
+
+        11. print_metrics : Boolean. Controls printing of metrics. default=True
+
+        12. evaluate      : Boolean. True if you want to evaluate your model on a test set. default=False
+
+        13. X_test        : Test set to be provided if evaluate=True.
+
+        14. y_test        : Labels coresponding to the test set. 
         """
-        dataset_size = self.X.shape[1]
-        k=1
-        cost_val = 0
-        for j in range(1, epochs+1):
-            start = time.time()
-            alpha = alpha/( 1 + decay_rate*(j-1) )
-            for i in range(0, dataset_size-batch_size+1, batch_size):
-                self.X_mini = self.X[:, i:i+batch_size]
-                self.y_mini = self.y[:, i:i+batch_size]
-                self.m_mini = self.y_mini.shape[1]
-                self._miniBatchTraining(alpha, beta1, beta2, _lambda, keep_prob,k)
-                aa = self.predict(self.X)
-                if not k%interval:
-                    if self.loss == 'b_ce':
-                        aa_ = aa > 0.5
-                        self.acc = np.sum(aa_ == self.y) / self.m
-                        cost_val = self._cost_func(aa, _lambda)
-                        self.cost.append(cost_val)
-                    elif self.loss == 'c_ce':
-                        aa_ = np.argmax(aa, axis = 0)
-                        yy = np.argmax(self.y, axis = 0)
-                        self.acc = np.sum(aa_==yy)/(self.m)
-                        cost_val = self._cost_func(aa, _lambda)
-                        self.cost.append(cost_val)
-                if print_metrics:
-                    sys.stdout.write(f'\rEpoch[{j}] {i+batch_size}/{self.m} : Cost = {cost_val:.4f} ; Acc = {(self.acc*100):.2f}% ; Time Taken = {(time.time()-start):.0f}s')
-                    print("\n")
-                k+=1
-        if evaluate:
-            print(f"For batch_size = {batch_size}, epochs = {epochs}, alpha = {alpha}, decay_rate = {decay_rate}, _lambda = {_lambda}, keep_prob = {keep_prob}")
-            aa = self.predict(X_test)
-            if self.loss == 'b_ce':
-                aa_ = aa > 0.5
-                acc = np.sum(aa_ == y_test) / X_test.shape[1]
-                print(f"Accuracy on training set: {self.acc}")
-                print(f"Accuracy on test set: {acc}\n")
-            elif self.loss == 'c_ce':
-                aa_ = np.argmax(aa, axis = 0)
-                yy = np.argmax(y_test, axis = 0)
-                acc = np.sum(aa_==yy)/(X_test.shape[1])
-                print(f"Accuracy on training set: {self.acc}")
-                print(f"Accuracy on test set: {acc}\n")
+        dataset_size = self.X.shape[1]                                                                                                                                                  # Store the dataset size.
+        k=1                                                                                                                                                                             # Step.
+        cost_val = 0                                                                                                                                                                    # Variable to store the value of cost while we are training our network.
+        for j in range(1, epochs+1):                                                                                                                                                    # Looping epochs no. of times.
+            start = time.time()                                                                                                                                                         # Starting to train a mini_batch.
+            alpha = alpha/( 1 + decay_rate*(j-1) )                                                                                                                                      # Decaying learning rate after every epoch.
+            for i in range(0, dataset_size-batch_size+1, batch_size):                                                                                                                   # Loop to devide the dataset into mini_batches and training each of them.
+                self.X_mini = self.X[:, i:i+batch_size]                                                                                                                                 # Slicing dataset into one mini_batch.
+                self.y_mini = self.y[:, i:i+batch_size]                                                                                                                                 # Slicing coresponding labels.
+                self.m_mini = self.y_mini.shape[1]                                                                                                                                      # Storing the number of examples in the mini_batch. Used later during calculation of cost derivative.
+                self._miniBatchTraining(alpha, beta1, beta2, _lambda, keep_prob,k)                                                                                                      # Training a single mini_batch.
+                if not k%interval:                                                                                                                                                      # Print metrics after every interval.
+                    aa = self.predict(self.X)                                                                                                                                           # Predicting on our dataset.
+                    if self.loss == 'b_ce':                                                                                                                                             # Handing metrics for binary classification.
+                        aa_ = aa > threshold                                                                                                                                            # Thresholding.
+                        self.acc = np.sum(aa_ == self.y) / self.m                                                                                                                       # Calculating the accuracy achieved on the training_set.
+                        cost_val = self._cost_func(aa, _lambda)                                                                                                                         # Calculating the value of cost function.
+                        self.cost.append(cost_val)                                                                                                                                      # Logging it in the list of cost values.
+                    elif self.loss == 'c_ce':                                                                                                                                           # Haldling metrics for categorical classification.
+                        aa_ = np.argmax(aa, axis = 0)                                                                                                                                   # Getting the label of our prediction.
+                        yy = np.argmax(self.y, axis = 0)                                                                                                                                # Getting the correct label.
+                        self.acc = np.sum(aa_==yy)/(self.m)                                                                                                                             # Comparing our predictions with correct labels.
+                        cost_val = self._cost_func(aa, _lambda)                                                                                                                         # Calculating the value of cost function.
+                        self.cost.append(cost_val)                                                                                                                                      # Logging it in the list of cost values.
+                if print_metrics:                                                                                                                                                       # If the user wants to print the metrics, print them.
+                    sys.stdout.write(f'\rEpoch[{j}] {i+batch_size}/{self.m} : Cost = {cost_val:.4f} ; Acc = {(self.acc*100):.2f}% ; Time Taken = {(time.time()-start):.0f}s')           # Print the metrics.
+                k+=1                                                                                                                                                                    # Increment the step by one.
+            print('\n')                                                                                                                                                                 # Line Break.
+        if evaluate:                                                                                                                                                                    # Checking if the user wants to evaluate the model on a test set.
+            print(f"For batch_size = {batch_size}, epochs = {epochs}, alpha = {alpha}, decay_rate = {decay_rate}, _lambda = {_lambda}, keep_prob = {keep_prob}")                        # Print the values of hyperparameters.
+            aa = self.predict(X_test)                                                                                                                                                   # Predicting the labels of test set.
+            if self.loss == 'b_ce':                                                                                                                                                     # Handling the metrics for binary classification.
+                aa_ = aa > threshold                                                                                                                                                    # Thresholding.
+                acc = np.sum(aa_ == y_test) / X_test.shape[1]                                                                                                                           # Calculating the accuracy achieved on the test set.
+                print(f"Accuracy on training set: {self.acc}")                                                                                                                          # Print the accuracy achieved on the training_set.
+                print(f"Accuracy on test set: {acc}\n")                                                                                                                                 # Print the accuracy achieved on the test set.
+            elif self.loss == 'c_ce':                                                                                                                                                   # Handling the metrics for categorical classification.
+                aa_ = np.argmax(aa, axis = 0)                                                                                                                                           # Getting the label of our prediction.
+                yy = np.argmax(y_test, axis = 0)                                                                                                                                        # Getting the correct label.
+                acc = np.sum(aa_==yy)/(X_test.shape[1])                                                                                                                                 # Comparing our predictions with correct labels.
+                print(f"Accuracy on training set: {self.acc}")                                                                                                                          # Print the accuracy achieved on the training_set.
+                print(f"Accuracy on test set: {acc}\n")                                                                                                                                 # Print the accuracy achieved on the test set.
         
     
     def _miniBatchTraining(self, alpha, beta1, beta2, _lambda, keep_prob,i):
@@ -277,6 +298,24 @@ class NeuralNet :
     def _cost_derivative(self, a) : 
         """ The derivative of cost w.r.t z """
         return (a-self.y_mini)
+
+    def plot_decision_boundary(self, X_set, y_set, title='', xlab='', ylab=''):
+        X_set, y_set = X_set.T, y_set.T
+        X1, X2 = np.meshgrid(np.arange(start = X_set[:, 0].min() - 1, stop = X_set[:, 0].max() + 1, step = 0.01),
+                             np.arange(start = X_set[:, 1].min() - 1, stop = X_set[:, 1].max() + 1, step = 0.01))
+        preds = self.predict(np.array([X1.ravel(), X2.ravel()])).reshape(X1.shape)
+        preds = 1*(preds > 0.5)
+        plt.contourf(X1, X2, preds, alpha = 0.75, cmap = ListedColormap(('red', 'green')))
+        plt.xlim(X1.min(), X1.max())
+        plt.ylim(X2.min(), X2.max())
+        for i, j in enumerate(np.unique(y_set[:,0])):
+            plt.scatter(X_set[y_set[:,0] == j, 0], X_set[y_set[:,0] == j, 1],
+                        c = ListedColormap(('red', 'green'))(i), label = j)
+        plt.title(title)
+        plt.xlabel(xlab)
+        plt.ylabel(ylab)
+        plt.legend()
+        plt.show()
    
     @property
     def summary(self) :
@@ -287,35 +326,41 @@ class NeuralNet :
 
 class HyperParameterTuning:
 
-    def __init__(self):
-        pass
+    def __init__(self, layers, X, y, ac_funcs, X_test, y_test):
+        self.layers = layers
+        self.X = X
+        self.y = y
+        self.ac_funcs = ac_funcs
+        self.X_test = X_test
+        self.y_test = y_test
+        
 
-    def GridSearch(self, layers, X, y, ac_funcs, params, X_test, y_test):
+    def GridSearch(self, params):
         if __name__ == '__main__':
             models=[]
             with ppe(max_workers = len(params)) as pool:
                 for param in params:
-                    models.append(NeuralNet(layers, X, y, ac_funcs))
-                    pool.submit(models[-1].startTraining, batch_size=param['batch_size'], epochs=param['epochs'], alpha=param['alpha'], decay_rate=param['decay_rate'], _lambda=param['_lambda'], keep_prob=param['keep_prob'], print_metrics=False, evaluate=True, X_test=X_test, y_test=y_test)
+                    models.append(NeuralNet(self.layers, self.X, self.y, self.ac_funcs))
+                    pool.submit(models[-1].startTraining, batch_size=param['batch_size'], epochs=param['epochs'], alpha=param['alpha'], decay_rate=param['decay_rate'], _lambda=param['_lambda'], keep_prob=param['keep_prob'], print_metrics=False, evaluate=True, X_test=self.X_test, y_test=self.y_test)
+        return models
 
-    def RandomizedGridSearch(self, layers, X, y, ac_funcs, params_range, nb_models, X_test, y_test):
-    	if __name__ == '__main__':
-	    	models = []
-	    	params = []
-	    	for i in range(nb_models):
-	    		params.append({
-	    			'batch_size' : int(np.round(np.random.rand()*(params_range['batch_size'][1]-params_range['batch_size'][0]) + params_range['batch_size'][0])),
-	    			'epochs' : int(np.round(np.random.rand()*(params_range['epochs'][1]-params_range['epochs'][0]) + params_range['epochs'][0])),
-	    			'alpha' : 10**(np.random.rand()*(np.log10(params_range['alpha'][1])-np.log10(params_range['alpha'][0])) + np.log10(params_range['alpha'][0])),
-	    			'decay_rate' : 10**(np.random.rand()*(np.log10(params_range['decay_rate'][1])-np.log10(params_range['decay_rate'][0])) + np.log10(params_range['decay_rate'][0])),
-	    			'_lambda' : 10**(np.random.rand()*(np.log10(params_range['_lambda'][1])-np.log10(params_range['_lambda'][0])) + np.log10(params_range['_lambda'][0])),
-	    			'keep_prob' : [(np.random.rand()*(params_range['keep_prob'][1]-params_range['keep_prob'][0]) + params_range['keep_prob'][0]) for j in range(len(layers)-1)]
-	    			})
-	    	with ppe(max_workers = len(params)) as pool:
-	    		for param in params:
-	    			models.append(NeuralNet(layers, X, y, ac_funcs))
-	    			pool.submit(models[-1].startTraining, batch_size=param['batch_size'], epochs=param['epochs'], alpha=param['alpha'], decay_rate=param['decay_rate'], _lambda=param['_lambda'], keep_prob=param['keep_prob'], print_metrics=False, evaluate=True, X_test=X_test, y_test=y_test)
-        
+    def RandomizedGridSearch(self, params_range, nb_models):
+        if __name__ == '__main__':
+            models = []
+            params = []
+            for i in range(nb_models):
+                params.append({
+                    'batch_size' : int(np.round(np.random.rand()*(params_range['batch_size'][1]-params_range['batch_size'][0]) + params_range['batch_size'][0])),
+                    'epochs' : int(np.round(np.random.rand()*(params_range['epochs'][1]-params_range['epochs'][0]) + params_range['epochs'][0])),
+                    'alpha' : 10**(np.random.rand()*(np.log10(params_range['alpha'][1])-np.log10(params_range['alpha'][0])) + np.log10(params_range['alpha'][0])),
+                    'decay_rate' : 10**(np.random.rand()*(np.log10(params_range['decay_rate'][1])-np.log10(params_range['decay_rate'][0])) + np.log10(params_range['decay_rate'][0])),
+                    '_lambda' : 10**(np.random.rand()*(np.log10(params_range['_lambda'][1])-np.log10(params_range['_lambda'][0])) + np.log10(params_range['_lambda'][0])),
+                    'keep_prob' : [(np.random.rand()*(params_range['keep_prob'][1]-params_range['keep_prob'][0]) + params_range['keep_prob'][0]) for j in range(len(self.layers)-1)]
+                    })
+            with ppe(max_workers = len(params)) as pool:
+                for param in params:
+                    models.append(NeuralNet(self.layers, self.X, self.y, self.ac_funcs))
+                    pool.submit(models[-1].startTraining, batch_size=param['batch_size'], epochs=param['epochs'], alpha=param['alpha'], decay_rate=param['decay_rate'], _lambda=param['_lambda'], keep_prob=param['keep_prob'], print_metrics=False, evaluate=True, X_test=self.X_test, y_test=self.y_test)
 
     def __repr__(self):
         return f'<HPT at {id(self)}>'
@@ -333,8 +378,57 @@ params = [
             {'batch_size':800,'epochs':200,'alpha':0.02,'decay_rate':0,'_lambda':1.5,'keep_prob':[0.9,0.9,1]}
          ]
 
-params_range = {'batch_size':[100, 1000],'epochs':[20,200],'alpha':[0.001, 0.02],'decay_rate':[0.000001, 0.0001],'_lambda':[0.1, 1.5],'keep_prob':[0.75, 1]}
 
-hpt = HyperParameterTuning()
-# hpt.GridSearch([16,16,1], X_train, y_train, ['relu','relu','sigmoid'], params, X_test, y_test)
-hpt.RandomizedGridSearch([16,16,1], X_train, y_train, ['relu','relu','sigmoid'], params_range, 20, X_test, y_test)
+# params_range = {'batch_size':[100, 1000],'epochs':[20,200],'alpha':[0.001, 0.02],'decay_rate':[0.000001, 0.0001],'_lambda':[0.1, 1.5],'keep_prob':[0.5, 1]}
+
+# hpt = HyperParameterTuning([16,16,1], X_train, y_train, ['relu','relu','sigmoid'], X_test, y_test)
+# # hpt.GridSearch(params)
+# hpt.RandomizedGridSearch(params_range, 20)
+
+
+# Initializing our neural network
+neural_net_sigmoid = NeuralNet([32,32,1], X_train, y_train, ac_funcs = ['relu','relu','sigmoid'])
+# Staring the training of our network.
+neural_net_sigmoid.startTraining(batch_size=500, epochs=100, alpha=0.01, decay_rate=0.0001, beta1=0.9, beta2=0.999, _lambda=0.7, keep_prob=[0.9,0.9], threshold=0.25)
+y_pred = 1*(neural_net_sigmoid.predict(X_test) > 0.25)
+
+# How good is our Neural Network?
+cm = confusion_matrix(y_test.T, y_pred.T)
+print(classification_report(y_test.T, y_pred.T))
+
+# Stolen form Stack Overflow
+fpr, tpr, threshold = roc_curve(y_test.T, y_pred.T)
+roc_auc = auc(fpr, tpr)
+plt.plot(fpr, tpr, 'b', label = f'NN AUC = {roc_auc:.2f}')
+plt.title('Receiver Operating Characteristic')
+plt.legend(loc = 'lower right')
+plt.plot([0, 1], [0, 1],'r--')
+plt.xlim([0, 1])
+plt.ylim([0, 1])
+plt.ylabel('True Positive Rate')
+plt.xlabel('False Positive Rate')
+plt.show()
+
+X_train = X_train.T
+X_test = X_test.T
+y_train = y_train.T
+y_test = y_test.T
+
+print("\n\nFor Random Forest : \n\n")
+from sklearn.ensemble import RandomForestClassifier
+model = RandomForestClassifier(n_estimators = 100, criterion ="entropy")
+model.fit(X_train, y_train)
+y_pred = model.predict(X_test)
+cm = confusion_matrix(y_test, y_pred)
+print(classification_report(y_test, y_pred))
+fpr, tpr, threshold = roc_curve(y_test, y_pred)
+roc_auc = auc(fpr, tpr)
+plt.plot(fpr, tpr, 'b', label = f'RF AUC = {roc_auc:.2f}')
+plt.title('Receiver Operating Characteristic')
+plt.legend(loc = 'lower right')
+plt.plot([0, 1], [0, 1],'r--')
+plt.xlim([0, 1])
+plt.ylim([0, 1])
+plt.ylabel('True Positive Rate')
+plt.xlabel('False Positive Rate')
+plt.show()
